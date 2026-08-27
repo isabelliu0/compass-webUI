@@ -1,3 +1,4 @@
+// GENERATED - do not edit by hand.
 // Source: openapi.json (published by the physicaltab policy server).
 // Regenerate: npm run codegen
 
@@ -15,6 +16,32 @@ export interface Camera {
   T_pelvis_in_optical: number[][];
 }
 
+/** What the operator is being asked about. */
+export interface Decision {
+  kind: DecisionKind;
+  /**
+   * arm indices this decision is about (0 left, 1 right). Empty means it
+   * concerns both hands together -- draw the pair rather than one endpoint. For
+   * a gripper event this is the hand actually opening or closing, the only
+   * endpoint worth marking.
+   */
+  hands: number[];
+}
+
+/**
+ * Why the robot stopped to ask. INITIAL the episode-start decision point.
+ * GRIPPER a hand is about to grasp or release. INTER_HAND the inter-hand
+ * transform T_LR changed coordination regime. Only the ``--seg-method regime``
+ * segmenter can detect this. STATIC both arms went still and are about to move
+ * again. Under ``--seg-method gripper-static`` this is what stands in for an
+ * inter-hand event -- it occupies the same slot in the state machine but is
+ * not a T_LR regime change, so it is named for what it is. NONE no boundary at
+ * all. Only appears as a mode's ``outcome``: the segmenter found nothing
+ * inside that chunk, so the marker is just the end of the preview rather than
+ * a decision point.
+ */
+export type DecisionKind = "initial" | "gripper" | "inter_hand" | "static" | "none";
+
 /** One entry in the menu offered at a decision point. */
 export interface ModeOption {
   /** rank; 0 is dominant and the default on timeout */
@@ -24,8 +51,13 @@ export interface ModeOption {
   trajectory: Trajectory;
   /** row of `trajectory` where this mode's own next decision point lands */
   outcome_index: number;
-  /** RGB 0-255, stable per mode id */
-  color: number[];
+  /**
+   * what will be asked at `outcome_index`. The marker sits there, so this -- not
+   * `State.decision` -- is what decides how to draw it. `State.decision` is the
+   * boundary holding the robot right now; this is the one this mode leads to,
+   * and modes can differ.
+   */
+  outcome: Decision;
 }
 
 /** Static description of this server. Read once at connect. */
@@ -41,16 +73,28 @@ export interface OperatorInfo {
   mode_menu_enabled: boolean;
   mode_follow_enabled: boolean;
   /**
-   * seconds the operator gets at a decision point before the server auto-resumes
-   * on the selected mode. 0 = no hold.
+   * seconds at a decision point before the server auto-resumes. null = untimed:
+   * the robot holds until a mode is selected, which is the go-ahead. 0 = no hold
+   * at all (the menu just refreshes).
    */
-  decide_timeout_s: number;
+  decide_timeout_s: number | null;
+  /**
+   * gripper width below this counts as closed; the same threshold the server
+   * uses to fire grasp/release decision points
+   */
+  grip_closed_below: number;
   camera: Camera | null;
 }
 
 /** Everything the operator client needs, in one snapshot. */
 export interface OperatorState {
   phase: Phase;
+  /**
+   * what the menu currently on offer is about. Stays populated after the hold
+   * ends, because the menu itself stays selectable until the next boundary
+   * replaces it. Null only before the first decision point of an episode.
+   */
+  decision?: Decision | null;
   /** identifies the current menu; echo it back on select */
   menu_epoch: number;
   menu_ready: boolean;
@@ -59,6 +103,8 @@ export interface OperatorState {
   mode_follow_active: boolean;
   /** [arm] -> [x,y,z] finger-centre now, pelvis frame, metres */
   current_ee: number[][];
+  /** [arm] -> measured gripper width now, in [0,1] */
+  current_grip?: number[];
   current_plan: Trajectory;
   modes: ModeOption[];
 }
@@ -74,14 +120,19 @@ export interface PauseResponse {
 
 /**
  * What the robot is doing, from the operator's point of view. IDLE no
- * observations yet (the robot client has not started streaming). RUNNING
- * executing the chosen mode; no decision pending. DECIDING held at a decision
- * point: a menu is offered and the timeout is running. On expiry the server
- * auto-resumes with whatever mode is selected (mode 0 unless the operator
- * picked another), so this is a soft deadline rather than a blocking prompt.
- * PAUSED held by the operator; stays held until ``set_paused(False)``.
+ * observations yet (the robot client isn't streaming). INITIAL_PAUSE held at
+ * the episode-start decision point, before any motion. EXECUTING rolling out
+ * the chosen mode; no decision pending. PAUSE_GRIPPER_EVENT held at a
+ * grasp/release decision point. ``State.decision.hands`` says which hand is
+ * acting, so a client can mark just that one. PAUSE_IHTF_EVENT held at a
+ * decision point about the pair rather than one hand. ``State.decision.kind``
+ * says which detector fired -- only the ``regime`` segmenter produces true
+ * inter-hand-transform events. PAUSED held by the operator; stays held until
+ * ``set_paused(False)``. The three PAUSE_/INITIAL_ states are all decision
+ * holds and all carry a menu; they differ only in what the operator is being
+ * asked about.
  */
-export type Phase = "idle" | "running" | "deciding" | "paused";
+export type Phase = "idle" | "initial_pause" | "executing" | "pause_gripper_event" | "pause_ihtf_event" | "paused";
 
 export interface SelectRequest {
   mode_id: number;
@@ -113,4 +164,10 @@ export interface Trajectory {
    * step.
    */
   times: number[];
+  /**
+   * [arm][row] -> gripper width in [0,1] (0 closed, 1 open), on the same rows as
+   * `points`. Style the path by hand state; compare against `grip_closed_below`
+   * from /operator/info.
+   */
+  grip?: number[][];
 }

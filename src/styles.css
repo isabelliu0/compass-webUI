@@ -47,10 +47,12 @@ header {
   border-radius: 6px;
   background: #3a3f4a;
 }
-.phase.running  { background: var(--ok);     color: #04120a; }
-.phase.deciding { background: var(--warn);   color: #1a0f00; }
-.phase.paused   { background: var(--danger); color: #fff; }
-.phase.idle     { background: #3a3f4a;       color: var(--muted); }
+.phase.executing            { background: var(--ok);     color: #04120a; }
+.phase.initial_pause,
+.phase.pause_gripper_event,
+.phase.pause_ihtf_event     { background: var(--warn);   color: #1a0f00; }
+.phase.paused               { background: var(--danger); color: #fff; }
+.phase.idle                 { background: #3a3f4a;       color: var(--muted); }
 
 .pill {
   display: flex;
@@ -131,6 +133,65 @@ main {
 }
 .caption span { color: var(--muted); font-weight: 400; }
 
+.viewtabs {
+  display: inline-flex;
+  gap: 0;
+  margin-right: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.viewtabs button {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border: 0;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.viewtabs button + button { border-left: 1px solid var(--line); }
+.viewtabs button:hover { color: var(--text); }
+.viewtabs button.on { background: var(--accent); color: #04121c; }
+
+.scene3d {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0b0c0f;
+  line-height: 0;
+}
+.scene-reset {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(20, 22, 28, 0.85);
+  color: var(--text);
+  cursor: pointer;
+}
+.scene-reset:hover { border-color: #4a505c; }
+
+.scene-badge {
+  position: absolute;
+  left: 10px;
+  bottom: 9px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 3px 8px;
+  border-radius: 5px;
+}
+
 .camera {
   position: relative;
   background: #000;
@@ -190,7 +251,6 @@ main {
   color: var(--text);
   background: var(--panel);
   border: 1px solid var(--line);
-  border-left-width: 4px;
   border-radius: 10px;
   padding: 9px 11px;
   margin-bottom: 10px;
@@ -198,10 +258,10 @@ main {
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .mode-card:hover { border-color: #4a505c; }
+.mode-card.hovered { border-color: #6b7280; background: var(--panel-2); }
 .mode-card.selected { box-shadow: 0 0 0 2px #f0b429 inset; }
 
 .mode-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
-.swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .mode-meta { margin-left: auto; font-size: 11px; color: var(--muted); }
 
 .badge {
@@ -221,6 +281,7 @@ main {
   overflow: hidden;
   margin-top: 7px;
 }
-.dominance i { display: block; height: 100%; }
+/* Dominance is a magnitude, not an identity — one neutral accent, no per-mode hue. */
+.dominance i { display: block; height: 100%; background: var(--accent); opacity: 0.75; }
 
 .thumb { margin-top: 8px; border-radius: 6px; background: #0b0b0d; display: block; }

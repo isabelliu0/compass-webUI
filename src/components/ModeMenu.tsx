@@ -2,25 +2,39 @@ import { useEffect, useRef } from 'react'
 
 import { frameUrl } from '../api/client'
 import type { Camera, ModeOption, OperatorState } from '../api/types'
-import { horizonSeconds, makeProjector, rgb, type Point2 } from '../render/project'
+import {
+  gripRuns,
+  handColor,
+  horizonSeconds,
+  makeProjector,
+  modeMarkers,
+  outcomeTime,
+  rgb,
+  type Point2,
+} from '../render/project'
 
 const THUMB_W = 240
+const LEFT_ARC = [Math.PI / 2, (3 * Math.PI) / 2] as const
+const RIGHT_ARC = [-Math.PI / 2, Math.PI / 2] as const
 
 /**
- * Each mode alone on the frame as it was at this decision point. The background
- * is captured once per epoch so the menu is a still comparison rather than a set
- * of live views that keep changing underneath the operator.
+ * Each mode alone on the frame as it was at this decision point, trimmed to that
+ * mode's own next decision point. The background is captured once per epoch so
+ * the menu is a still comparison rather than views shifting while the operator
+ * is choosing.
  */
 function Thumbnail({
   camera,
   mode,
   background,
-  selected,
+  closedBelow,
+  active,
 }: {
   camera: Camera
   mode: ModeOption
   background: HTMLImageElement | null
-  selected: boolean
+  closedBelow: number
+  active: boolean
 }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const height = Math.round((THUMB_W * camera.height) / camera.width)
@@ -38,7 +52,7 @@ function Thumbnail({
 
     if (background?.complete && background.naturalWidth) {
       ctx.drawImage(background, 0, 0, THUMB_W, height)
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.25)'
+      ctx.fillStyle = `rgba(0,0,0,${active ? 0.1 : 0.3})`
       ctx.fillRect(0, 0, THUMB_W, height)
     } else {
       ctx.fillStyle = '#0b0b0d'
@@ -46,30 +60,69 @@ function Thumbnail({
     }
 
     const project = makeProjector(camera, THUMB_W)
-    mode.trajectory.points.forEach((arm, i) => {
+    const end = Math.max(0, Math.min(mode.outcome_index, mode.trajectory.times.length - 1))
+
+    mode.trajectory.points.forEach((arm, ai) => {
       if (!arm.length) return
-      const pts = arm
-        .map(project)
-        .filter((p): p is Point2 => p !== null)
-      if (pts.length >= 2) {
-        ctx.setLineDash(i === 0 ? [] : [3, 3])
-        ctx.strokeStyle = rgb(mode.color, 0.98)
-        ctx.lineWidth = selected ? 2.4 : 1.8
+      gripRuns(mode.trajectory.grip?.[ai], 0, end, closedBelow).forEach((run) => {
+        const q = arm
+          .slice(run.start, run.end + 1)
+          .map(project)
+          .filter((p): p is Point2 => p !== null)
+        if (q.length < 2) return
+        ctx.setLineDash(run.closed ? [] : [3, 3])
+        ctx.strokeStyle = rgb(handColor(ai), 0.98)
+        ctx.lineWidth = active ? 2.4 : 1.8
+        ctx.lineCap = 'round'
         ctx.beginPath()
-        pts.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)))
+        q.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)))
+        ctx.stroke()
+        ctx.setLineDash([])
+      })
+    })
+
+    const r = active ? 5.5 : 4.5
+    for (const marker of modeMarkers(
+      mode.trajectory, mode.outcome_index, mode.outcome,
+    )) {
+      const p = project(marker.point)
+
+      if (marker.kind === 'hand') {
+        if (!p) continue
+        ctx.strokeStyle = rgb(handColor(marker.arm), 1)
+        ctx.lineWidth = 1.8
+        ctx.beginPath()
+        ctx.arc(p[0], p[1], r, 0, Math.PI * 2)
+        ctx.stroke()
+        continue
+      }
+
+      // Pair: gradient segment between the hands, and a midpoint ring split so each
+      // half carries its own hand's colour. Same encoding as the main camera view.
+      const q = marker.ends.map(project).filter((pt): pt is Point2 => pt !== null)
+      if (q.length === 2) {
+        const grad = ctx.createLinearGradient(q[0][0], q[0][1], q[1][0], q[1][1])
+        grad.addColorStop(0, rgb(handColor(0), 0.9))
+        grad.addColorStop(1, rgb(handColor(1), 0.9))
+        ctx.setLineDash([2, 3])
+        ctx.strokeStyle = grad
+        ctx.lineWidth = 1.3
+        ctx.beginPath()
+        ctx.moveTo(q[0][0], q[0][1])
+        ctx.lineTo(q[1][0], q[1][1])
         ctx.stroke()
         ctx.setLineDash([])
       }
-      const outcome = project(arm[Math.min(mode.outcome_index, arm.length - 1)])
-      if (outcome) {
-        ctx.strokeStyle = rgb(mode.color)
-        ctx.lineWidth = 1.6
+      if (!p) continue
+      ctx.lineWidth = 1.8
+      for (const [arc, arm] of [[LEFT_ARC, 0], [RIGHT_ARC, 1]] as const) {
+        ctx.strokeStyle = rgb(handColor(arm), 1)
         ctx.beginPath()
-        ctx.arc(outcome[0], outcome[1], selected ? 5 : 4, 0, Math.PI * 2)
+        ctx.arc(p[0], p[1], r, arc[0], arc[1])
         ctx.stroke()
       }
-    })
-  }, [camera, mode, background, selected, height])
+    }
+  }, [camera, mode, background, closedBelow, active, height])
 
   return <canvas ref={ref} className="thumb" style={{ width: THUMB_W, height }} />
 }
@@ -77,10 +130,20 @@ function Thumbnail({
 interface Props {
   camera: Camera
   state: OperatorState
+  closedBelow: number
+  hovered: number | null
+  onHover: (modeId: number | null) => void
   onSelect: (modeId: number) => void
 }
 
-export function ModeMenu({ camera, state, onSelect }: Props) {
+export function ModeMenu({
+  camera,
+  state,
+  closedBelow,
+  hovered,
+  onHover,
+  onSelect,
+}: Props) {
   const bg = useRef<HTMLImageElement | null>(null)
   const epoch = useRef<number>(-1)
 
@@ -114,39 +177,42 @@ export function ModeMenu({ camera, state, onSelect }: Props) {
     <div className="menu">
       <p className="menu-title">
         menu @ epoch {state.menu_epoch}
-        <span> — {state.modes.length} mode(s), each shown alone on the frozen frame</span>
+        <span> — {state.modes.length} option(s), each drawn only as far as its own
+          next decision point</span>
       </p>
       {state.modes.map((mode) => {
         const selected = mode.id === state.selected_mode_id
+        const active = mode.id === hovered
+        const end = Math.max(0, Math.min(mode.outcome_index, mode.trajectory.times.length - 1))
         return (
           <button
             key={mode.id}
             type="button"
-            className={`mode-card${selected ? ' selected' : ''}`}
-            style={{ borderLeftColor: rgb(mode.color) }}
+            className={`mode-card${selected ? ' selected' : ''}${active ? ' hovered' : ''}`}
+            onMouseEnter={() => onHover(mode.id)}
+            onMouseLeave={() => onHover(null)}
+            onFocus={() => onHover(mode.id)}
+            onBlur={() => onHover(null)}
             onClick={() => onSelect(mode.id)}
           >
             <div className="mode-head">
-              <span className="swatch" style={{ background: rgb(mode.color) }} />
               mode {mode.id}
               {mode.id === 0 && <span className="badge">MAIN</span>}
               <span className="mode-meta">
-                {mode.count} samples · {horizonSeconds(mode.trajectory).toFixed(1)}s
+                {mode.count} samples · {outcomeTime(mode.trajectory, end).toFixed(1)}s
+                {' of '}
+                {horizonSeconds(mode.trajectory).toFixed(1)}s
               </span>
             </div>
             <div className="dominance">
-              <i
-                style={{
-                  width: `${((100 * mode.count) / total).toFixed(0)}%`,
-                  background: rgb(mode.color),
-                }}
-              />
+              <i style={{ width: `${((100 * mode.count) / total).toFixed(0)}%` }} />
             </div>
             <Thumbnail
               camera={camera}
               mode={mode}
               background={bg.current}
-              selected={selected}
+              closedBelow={closedBelow}
+              active={active}
             />
           </button>
         )

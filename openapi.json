@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Diffusion Policy server",
+    "title": "FastAPI",
     "version": "2.0"
   },
   "paths": {
@@ -223,6 +223,40 @@
         "title": "Camera",
         "description": "Steering-camera geometry. Constant for a run (the waist is fixed during\nmanipulation), so a client reads it once and projects locally."
       },
+      "Decision": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/DecisionKind"
+          },
+          "hands": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Hands",
+            "description": "arm indices this decision is about (0 left, 1 right). Empty means it concerns both hands together -- draw the pair rather than one endpoint. For a gripper event this is the hand actually opening or closing, the only endpoint worth marking."
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "hands"
+        ],
+        "title": "Decision",
+        "description": "What the operator is being asked about."
+      },
+      "DecisionKind": {
+        "type": "string",
+        "enum": [
+          "initial",
+          "gripper",
+          "inter_hand",
+          "static",
+          "none"
+        ],
+        "title": "DecisionKind",
+        "description": "Why the robot stopped to ask.\n\nINITIAL     the episode-start decision point.\nGRIPPER     a hand is about to grasp or release.\nINTER_HAND  the inter-hand transform T_LR changed coordination regime. Only the\n            ``--seg-method regime`` segmenter can detect this.\nSTATIC      both arms went still and are about to move again. Under\n            ``--seg-method gripper-static`` this is what stands in for an\n            inter-hand event -- it occupies the same slot in the state machine\n            but is not a T_LR regime change, so it is named for what it is.\nNONE        no boundary at all. Only appears as a mode's ``outcome``: the\n            segmenter found nothing inside that chunk, so the marker is just the\n            end of the preview rather than a decision point."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -256,13 +290,9 @@
             "title": "Outcome Index",
             "description": "row of `trajectory` where this mode's own next decision point lands"
           },
-          "color": {
-            "items": {
-              "type": "integer"
-            },
-            "type": "array",
-            "title": "Color",
-            "description": "RGB 0-255, stable per mode id"
+          "outcome": {
+            "$ref": "#/components/schemas/Decision",
+            "description": "what will be asked at `outcome_index`. The marker sits there, so this -- not `State.decision` -- is what decides how to draw it. `State.decision` is the boundary holding the robot right now; this is the one this mode leads to, and modes can differ."
           }
         },
         "type": "object",
@@ -271,7 +301,7 @@
           "count",
           "trajectory",
           "outcome_index",
-          "color"
+          "outcome"
         ],
         "title": "ModeOption",
         "description": "One entry in the menu offered at a decision point."
@@ -319,9 +349,21 @@
             "title": "Mode Follow Enabled"
           },
           "decide_timeout_s": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Decide Timeout S",
-            "description": "seconds the operator gets at a decision point before the server auto-resumes on the selected mode. 0 = no hold."
+            "description": "seconds at a decision point before the server auto-resumes. null = untimed: the robot holds until a mode is selected, which is the go-ahead. 0 = no hold at all (the menu just refreshes)."
+          },
+          "grip_closed_below": {
+            "type": "number",
+            "title": "Grip Closed Below",
+            "description": "gripper width below this counts as closed; the same threshold the server uses to fire grasp/release decision points"
           },
           "camera": {
             "anyOf": [
@@ -346,6 +388,7 @@
           "mode_menu_enabled",
           "mode_follow_enabled",
           "decide_timeout_s",
+          "grip_closed_below",
           "camera"
         ],
         "title": "OperatorInfo",
@@ -355,6 +398,17 @@
         "properties": {
           "phase": {
             "$ref": "#/components/schemas/Phase"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "what the menu currently on offer is about. Stays populated after the hold ends, because the menu itself stays selectable until the next boundary replaces it. Null only before the first decision point of an episode."
           },
           "menu_epoch": {
             "type": "integer",
@@ -394,6 +448,14 @@
             "type": "array",
             "title": "Current Ee",
             "description": "[arm] -> [x,y,z] finger-centre now, pelvis frame, metres"
+          },
+          "current_grip": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Current Grip",
+            "description": "[arm] -> measured gripper width now, in [0,1]"
           },
           "current_plan": {
             "$ref": "#/components/schemas/Trajectory"
@@ -455,12 +517,14 @@
         "type": "string",
         "enum": [
           "idle",
-          "running",
-          "deciding",
+          "initial_pause",
+          "executing",
+          "pause_gripper_event",
+          "pause_ihtf_event",
           "paused"
         ],
         "title": "Phase",
-        "description": "What the robot is doing, from the operator's point of view.\n\nIDLE      no observations yet (the robot client has not started streaming).\nRUNNING   executing the chosen mode; no decision pending.\nDECIDING  held at a decision point: a menu is offered and the timeout is running.\n          On expiry the server auto-resumes with whatever mode is selected\n          (mode 0 unless the operator picked another), so this is a soft deadline\n          rather than a blocking prompt.\nPAUSED    held by the operator; stays held until ``set_paused(False)``."
+        "description": "What the robot is doing, from the operator's point of view.\n\nIDLE                 no observations yet (the robot client isn't streaming).\nINITIAL_PAUSE        held at the episode-start decision point, before any motion.\nEXECUTING            rolling out the chosen mode; no decision pending.\nPAUSE_GRIPPER_EVENT  held at a grasp/release decision point. ``State.decision.hands``\n                     says which hand is acting, so a client can mark just that one.\nPAUSE_IHTF_EVENT     held at a decision point about the pair rather than one hand.\n                     ``State.decision.kind`` says which detector fired -- only the\n                     ``regime`` segmenter produces true inter-hand-transform events.\nPAUSED               held by the operator; stays held until ``set_paused(False)``.\n\nThe three PAUSE_/INITIAL_ states are all decision holds and all carry a menu; they\ndiffer only in what the operator is being asked about."
       },
       "SelectRequest": {
         "properties": {
@@ -549,6 +613,17 @@
             "type": "array",
             "title": "Times",
             "description": "[row] -> seconds from now. NOT uniformly spaced: the policy predicts on a multi-resolution grid, so interpolate on this rather than assuming a fixed step."
+          },
+          "grip": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Grip",
+            "description": "[arm][row] -> gripper width in [0,1] (0 closed, 1 open), on the same rows as `points`. Style the path by hand state; compare against `grip_closed_below` from /operator/info."
           }
         },
         "type": "object",
