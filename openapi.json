@@ -1,0 +1,604 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Diffusion Policy server",
+    "version": "2.0"
+  },
+  "paths": {
+    "/operator/info": {
+      "get": {
+        "tags": [
+          "operator"
+        ],
+        "summary": "Info",
+        "operationId": "info_operator_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operator/state": {
+      "get": {
+        "tags": [
+          "operator"
+        ],
+        "summary": "State",
+        "operationId": "state_operator_state_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operator/frame": {
+      "get": {
+        "tags": [
+          "operator"
+        ],
+        "summary": "Frame",
+        "description": "Latest steering-camera JPEG. Optional; ``ts`` is a client cache-buster.",
+        "operationId": "frame_operator_frame_get",
+        "parameters": [
+          {
+            "name": "ts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0.0,
+              "title": "Ts"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Latest steering-camera frame",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "404": {
+            "description": "No frame yet"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operator/select": {
+      "post": {
+        "tags": [
+          "operator"
+        ],
+        "summary": "Select",
+        "operationId": "select_operator_select_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operator/pause": {
+      "post": {
+        "tags": [
+          "operator"
+        ],
+        "summary": "Pause",
+        "operationId": "pause_operator_pause_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PauseResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Camera": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "width": {
+            "type": "integer",
+            "title": "Width"
+          },
+          "height": {
+            "type": "integer",
+            "title": "Height"
+          },
+          "K": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "K",
+            "description": "3x3 intrinsics at native resolution"
+          },
+          "T_pelvis_in_optical": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "T Pelvis In Optical",
+            "description": "4x4 pelvis -> camera optical frame"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "width",
+          "height",
+          "K",
+          "T_pelvis_in_optical"
+        ],
+        "title": "Camera",
+        "description": "Steering-camera geometry. Constant for a run (the waist is fixed during\nmanipulation), so a client reads it once and projects locally."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ModeOption": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "rank; 0 is dominant and the default on timeout"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "samples that landed in this cluster (dominance)"
+          },
+          "trajectory": {
+            "$ref": "#/components/schemas/Trajectory"
+          },
+          "outcome_index": {
+            "type": "integer",
+            "title": "Outcome Index",
+            "description": "row of `trajectory` where this mode's own next decision point lands"
+          },
+          "color": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Color",
+            "description": "RGB 0-255, stable per mode id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "count",
+          "trajectory",
+          "outcome_index",
+          "color"
+        ],
+        "title": "ModeOption",
+        "description": "One entry in the menu offered at a decision point."
+      },
+      "OperatorInfo": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "title": "Api Version"
+          },
+          "arms": {
+            "type": "integer",
+            "title": "Arms"
+          },
+          "arm_order": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Arm Order"
+          },
+          "frame": {
+            "type": "string",
+            "title": "Frame",
+            "description": "reference frame of every 3D point ('pelvis')"
+          },
+          "position_units": {
+            "type": "string",
+            "title": "Position Units"
+          },
+          "time_units": {
+            "type": "string",
+            "title": "Time Units"
+          },
+          "fps": {
+            "type": "integer",
+            "title": "Fps"
+          },
+          "mode_menu_enabled": {
+            "type": "boolean",
+            "title": "Mode Menu Enabled"
+          },
+          "mode_follow_enabled": {
+            "type": "boolean",
+            "title": "Mode Follow Enabled"
+          },
+          "decide_timeout_s": {
+            "type": "number",
+            "title": "Decide Timeout S",
+            "description": "seconds the operator gets at a decision point before the server auto-resumes on the selected mode. 0 = no hold."
+          },
+          "camera": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Camera"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "api_version",
+          "arms",
+          "arm_order",
+          "frame",
+          "position_units",
+          "time_units",
+          "fps",
+          "mode_menu_enabled",
+          "mode_follow_enabled",
+          "decide_timeout_s",
+          "camera"
+        ],
+        "title": "OperatorInfo",
+        "description": "Static description of this server. Read once at connect."
+      },
+      "OperatorState": {
+        "properties": {
+          "phase": {
+            "$ref": "#/components/schemas/Phase"
+          },
+          "menu_epoch": {
+            "type": "integer",
+            "title": "Menu Epoch",
+            "description": "identifies the current menu; echo it back on select"
+          },
+          "menu_ready": {
+            "type": "boolean",
+            "title": "Menu Ready"
+          },
+          "decide_remaining_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decide Remaining S"
+          },
+          "selected_mode_id": {
+            "type": "integer",
+            "title": "Selected Mode Id"
+          },
+          "mode_follow_active": {
+            "type": "boolean",
+            "title": "Mode Follow Active"
+          },
+          "current_ee": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Current Ee",
+            "description": "[arm] -> [x,y,z] finger-centre now, pelvis frame, metres"
+          },
+          "current_plan": {
+            "$ref": "#/components/schemas/Trajectory"
+          },
+          "modes": {
+            "items": {
+              "$ref": "#/components/schemas/ModeOption"
+            },
+            "type": "array",
+            "title": "Modes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phase",
+          "menu_epoch",
+          "menu_ready",
+          "decide_remaining_s",
+          "selected_mode_id",
+          "mode_follow_active",
+          "current_ee",
+          "current_plan",
+          "modes"
+        ],
+        "title": "OperatorState",
+        "description": "Everything the operator client needs, in one snapshot."
+      },
+      "PauseRequest": {
+        "properties": {
+          "paused": {
+            "type": "boolean",
+            "title": "Paused"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paused"
+        ],
+        "title": "PauseRequest"
+      },
+      "PauseResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/Phase"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "phase"
+        ],
+        "title": "PauseResponse"
+      },
+      "Phase": {
+        "type": "string",
+        "enum": [
+          "idle",
+          "running",
+          "deciding",
+          "paused"
+        ],
+        "title": "Phase",
+        "description": "What the robot is doing, from the operator's point of view.\n\nIDLE      no observations yet (the robot client has not started streaming).\nRUNNING   executing the chosen mode; no decision pending.\nDECIDING  held at a decision point: a menu is offered and the timeout is running.\n          On expiry the server auto-resumes with whatever mode is selected\n          (mode 0 unless the operator picked another), so this is a soft deadline\n          rather than a blocking prompt.\nPAUSED    held by the operator; stays held until ``set_paused(False)``."
+      },
+      "SelectRequest": {
+        "properties": {
+          "mode_id": {
+            "type": "integer",
+            "title": "Mode Id"
+          },
+          "menu_epoch": {
+            "type": "integer",
+            "title": "Menu Epoch",
+            "description": "the menu_epoch this pick was made against; a mismatch is rejected as stale rather than applied to a newer menu"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode_id",
+          "menu_epoch"
+        ],
+        "title": "SelectRequest"
+      },
+      "SelectResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SelectStatus"
+          },
+          "selected_mode_id": {
+            "type": "integer",
+            "title": "Selected Mode Id"
+          },
+          "menu_epoch": {
+            "type": "integer",
+            "title": "Menu Epoch"
+          },
+          "n_modes": {
+            "type": "integer",
+            "title": "N Modes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "status",
+          "selected_mode_id",
+          "menu_epoch",
+          "n_modes"
+        ],
+        "title": "SelectResponse"
+      },
+      "SelectStatus": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "stale_epoch",
+          "out_of_range",
+          "no_menu",
+          "menu_not_ready",
+          "disabled"
+        ],
+        "title": "SelectStatus",
+        "description": "Outcome of ``select_mode``."
+      },
+      "Trajectory": {
+        "properties": {
+          "points": {
+            "items": {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Points",
+            "description": "[arm][row] -> [x,y,z] finger-centre, pelvis frame, metres"
+          },
+          "times": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Times",
+            "description": "[row] -> seconds from now. NOT uniformly spaced: the policy predicts on a multi-resolution grid, so interpolate on this rather than assuming a fixed step."
+          }
+        },
+        "type": "object",
+        "required": [
+          "points",
+          "times"
+        ],
+        "title": "Trajectory",
+        "description": "A future path through space, one polyline per arm (left, right)."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
